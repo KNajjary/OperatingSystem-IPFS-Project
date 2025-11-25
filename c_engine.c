@@ -23,7 +23,29 @@
 #define OP_DOWNLOAD_CHUNK 0x91
 #define OP_DOWNLOAD_DONE 0x92
 
+#define DATA_BLOCK_SIZE (256 * 1024)
+#define HASH_LENGTH 32
+
 static const char *g_sock_path = NULL;
+static const char *BLOCKS_DIR = "blocks";
+static const char *MANIFESTS_DIR = "manifests";
+
+struct file_part
+{
+    int part_num;
+    int part_size;
+    unsigned char hash_code[HASH_LENGTH];
+    char *file_location;
+};
+
+struct upload_info
+{
+    char *file_name;
+    long long file_total_size;
+    int part_total_count;
+    struct file_part *parts_list;
+    int current_part;
+};
 
 ssize_t read_n(int fd, void *buf, size_t n)
 {
@@ -74,6 +96,14 @@ int send_frame(int fd, uint8_t op, const void *payload, uint32_t len)
     if (len && write_all(fd, payload, len) < 0)
         return -1;
     return 0;
+}
+
+void calculate_hash(const uint8_t *data, size_t len, uint8_t *hash)
+{
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    blake3_hasher_update(&hasher, data, len);
+    blake3_hasher_finalize(&hasher, hash, HASH_SIZE);
 }
 
 void handle_connection(int cfd)
