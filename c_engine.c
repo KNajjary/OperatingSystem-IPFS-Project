@@ -139,7 +139,7 @@ char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
 
     // ایجاد مسیر فایل نهایی
     char *file_path = malloc(300);
-    if(!*file_path)
+    if (!*file_path)
     {
         perror("malloc *file_path");
         return NULL;
@@ -193,7 +193,6 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
         perror("malloc *manifest_json");
         return NULL;
     }
-        
 
     // شروع ساخت JSON
     char *ptr = *manifest_json;
@@ -268,7 +267,7 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
         perror("malloc final_cid");
         return NULL;
     }
-    
+
     sprintf(final_cid, "b%s", cid); // "b" برای base32
 
     free(cid);
@@ -399,7 +398,7 @@ void handle_connection(int cfd)
             break;
         }
         uint8_t op = header[0];
-        uint32_t len; //data type
+        uint32_t len; // data type
         memcpy(&len, header + 1, 4);
         len = ntohl(len);
         uint8_t *payload = NULL;
@@ -451,15 +450,89 @@ void handle_connection(int cfd)
         }
         else if (op == OP_UPLOAD_CHUNK)
         {
-            // TODO: process chunk (hash/store); here just drop
+            if (!upload_state.file_name)
+            {
+                printf("[ENGINE] ERROR: Received chunk without START\n");
+                free(payload);
+                break;
+            }
+
+            // int chunk_size = len;
+            unsigned char hash[HASH_LENGTH];
+
+            // محاسبه هش چانک
+            calculate_hash(payload, len, hash);
+
+            // ذخیره چانک
+            char *stored_path = store_chunk(payload, len, hash);
+            if (!stored_path)
+            {
+                printf("[ENGINE] ERROR: Failed to store chunk\n");
+                free(payload);
+                break;
+            }
+
+            // افزایش آرایه چانک‌ها
+            struct file_part *newPartsList = realloc(upload_state.parts_list,
+                                                     (upload_state.part_total_count + 1) * sizeof(struct file_part));
+            if (!newPartsList)
+            {
+                perror("realloc parts_list");
+                free(payload);
+                break;
+            }
+
+            upload_state.parts_list = newPartsList;
+            // ادرس پارتی که میخوایم اضافه کنیم
+            struct file_part *part = &upload_state.parts_list[upload_state.part_total_count];
+
+            part->part_num = upload_state.part_total_count;
+            part->part_size = len;
+            memcpy(part->hash_code, hash, HASH_LENGTH);
+            part->file_location = stored_path;
+
+            upload_state.part_total_count++;
+            upload_state.file_total_size += len;
+
+            printf("[ENGINE] Processed chunk %d, size: %d\n",
+                   upload_state.part_total_count - 1, len);
         }
         else if (op == OP_UPLOAD_FINISH)
         {
-            // TODO: finalize DAG and compute real CID
-            const char *cid = "CID-PLACEHOLDER";
+            if (!upload_state.file_name)
+            {
+                printf("[ENGINE] ERROR: Received FINISH without START\n");
+                break;
+            }
+
+            printf("[ENGINE] UPLOAD_FINISH: processing %d chunks\n", upload_state.part_total_count);
+
+            // ایجاد مانیفست و محاسبه CID
+            char *manifest_json = NULL;
+            const char *cid = create_manifest(&upload_state, &manifest_json);
+
+            if (!cid || !manifest_json)
+            {
+                printf("[ENGINE] ERROR: Failed to create manifest\n");
+                break;
+            }
+
+            // ذخیره مانیفست
+            if (store_manifest(cid, manifest_json) < 0)
+            {
+                printf("[ENGINE] ERROR: Failed to store manifest\n");
+                free(cid);
+                free(manifest_json);
+                break;
+            }
+
             printf("[ENGINE] UPLOAD_FINISH -> returning CID %s\n", cid);
             fflush(stdout);
             send_frame(cfd, OP_UPLOAD_DONE, cid, (uint32_t)strlen(cid));
+
+            // پاکسازی حافظه
+            free(cid);
+            free(manifest_json);
         }
         else if (op == OP_DOWNLOAD_START)
         {
