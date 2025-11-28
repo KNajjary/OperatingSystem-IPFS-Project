@@ -139,6 +139,11 @@ char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
 
     // ایجاد مسیر فایل نهایی
     char *file_path = malloc(300);
+    if(!*file_path)
+    {
+        perror("malloc *file_path");
+        return NULL;
+    }
     snprintf(file_path, 300, "%s/%s", subdir_path, hash_hex);
 
     // بررسی وجود فایل
@@ -184,7 +189,11 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
 
     *manifest_json = malloc(json_size);
     if (!*manifest_json)
+    {
+        perror("malloc *manifest_json");
         return NULL;
+    }
+        
 
     // شروع ساخت JSON
     char *ptr = *manifest_json;
@@ -256,8 +265,10 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
     if (!final_cid)
     {
         free(cid);
+        perror("malloc final_cid");
         return NULL;
     }
+    
     sprintf(final_cid, "b%s", cid); // "b" برای base32
 
     free(cid);
@@ -388,7 +399,7 @@ void handle_connection(int cfd)
             break;
         }
         uint8_t op = header[0];
-        uint32_t len;
+        uint32_t len; //data type
         memcpy(&len, header + 1, 4);
         len = ntohl(len);
         uint8_t *payload = NULL;
@@ -417,6 +428,12 @@ void handle_connection(int cfd)
 
             // مقداردهی اولیه وضعیت آپلود
             upload_state.file_name = malloc(len + 1);
+            // check pointer
+            if (!upload_state.file_name)
+            {
+                perror("malloc upload_state.file_name");
+                break;
+            }
             memcpy(upload_state.file_name, payload, len);
             upload_state.file_name[len] = '\0';
             upload_state.file_total_size = 0;
