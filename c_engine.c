@@ -50,11 +50,18 @@ struct upload_info
 
 void ensure_dir(const char *path)
 {
-    struct stat st = {0};
-    if (stat(path, &st) == -1)
+    DWORD attribs = GetFileAttributes(path);
+    if (attribs != INVALID_FILE_ATTRIBUTES && (attribs & FILE_ATTRIBUTE_DIRECTORY))
     {
-        mkdir(path, 0755);
+        // پوشه وجود دارد
     }
+    // پوشه وجود ندارد، سعی در ساختن آن
+    else if (_mkdir(path) == 0)
+    {
+        // ساخته شد
+    }
+    // اگر ساخت موفق نبود
+    perror("dir")
 }
 
 ssize_t read_n(int fd, void *buf, size_t n)
