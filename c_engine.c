@@ -50,18 +50,11 @@ struct upload_info
 
 void ensure_dir(const char *path)
 {
-    DWORD attribs = GetFileAttributes(path);
-    if (attribs != INVALID_FILE_ATTRIBUTES && (attribs & FILE_ATTRIBUTE_DIRECTORY))
+    struct stat st = {0};
+    if (stat(path, &st) == -1)
     {
-        // dir exist
+        mkdir(path, 0755);
     }
-    // not exist
-    else if (_mkdir(path) == 0)
-    {
-        // successful
-    }
-    // unsuccessful
-    perror("dir")
 }
 
 ssize_t read_n(int fd, void *buf, size_t n)
@@ -114,18 +107,18 @@ int send_frame(int fd, uint8_t op, const void *payload, uint32_t len)
         return -1;
     return 0;
 }
-// calculate hash with blake3
-void calculate_hash(const unsigned char *data, int len, unsigned char *hash)
+
+void calculate_hash(const uint8_t *data, size_t len, uint8_t *hash)
 {
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
     blake3_hasher_update(&hasher, data, len);
-    blake3_hasher_finalize(&hasher, hash, HASH_LENGTH);
+    blake3_hasher_finalize(&hasher, hash, HASH_SIZE);
 }
 
 char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
 {
-    // convert hash to hex(encode)
+    // کنار هم گذاشتن خانه های آرایه هش
     char hash_hex[65];
     int i;
     for (i = 0; i < HASH_LENGTH; i++)
@@ -134,14 +127,7 @@ char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
     }
     hash_hex[64] = '\0';
 
-    // const char hexchars[] = "0123456789abcdef";
-    // for (size_t i = 0; i < HASH_LENGTH; ++i) {
-    //     hash_hex[i*2]     = hexchars[(hash[i] >> 4) & 0xF]; //high nibble
-    //     hash_hex[i*2 + 1] = hexchars[hash[i] & 0xF]; //low nibble
-    // }
-    // hash_hex[HASH_LENGTH*2] = '\0';
-
-    // build dir & subdir in blocks folder
+    // ساخت پوشه و زیر پوشه بر اساس دو گاراگتر اول و دوم هش
     char dir_path[256];
     char subdir_path[256];
     snprintf(dir_path, sizeof(dir_path), "%s/%.2s", BLOCKS_DIR, hash_hex);
@@ -160,24 +146,16 @@ char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
     }
     snprintf(file_path, 300, "%s/%s", subdir_path, hash_hex);
 
-    // check if file exist
-    //  struct stat st;
-    //  if (stat(file_path, &st) == 0)
-    //  {
-    //      printf("[ENGINE] Chunk already exists: %s\n", hash_hex);
-    //      return file_path;
-    //  }
-
-    // check if file exist
-    DWORD attribs = GetFileAttributes(file_path);
-    if (attribs != INVALID_FILE_ATTRIBUTES && (attribs & FILE_ATTRIBUTE_DIRECTORY)) // path exist and is a directory
+    // بررسی وجود فایل
+    struct stat st;
+    if (stat(file_path, &st) == 0)
     {
         printf("[ENGINE] Chunk already exists: %s\n", hash_hex);
         return file_path;
     }
+
     // ذخیره چانک جدید
-    int fd = open(file_path, O_WRONLY | O_CREAT | O_EXCL, 0644); // recheck exist or not with O_EXCL for race condition
-    // check again maybe only work on linux$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    int fd = open(file_path, O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd < 0)
     {
         perror("open chunk file");
@@ -198,9 +176,10 @@ char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
     return file_path;
 }
 
+// $$ تابع اصلاح شده برای ایجاد مانیفست
 char *create_manifest(struct upload_info *state, char **manifest_json)
 {
-    // calculate required JSON size
+    // محاسبه اندازه مورد نیاز برای JSON
     int json_size = 1024; // اندازه پایه
     int i;
     for (i = 0; i < state->part_total_count; i++)
@@ -215,9 +194,9 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
         return NULL;
     }
 
-    // start build json file
+    // شروع ساخت JSON
     char *ptr = *manifest_json;
-    int written = snprintf(ptr, json_size, // pointer to out buffer & max buffer size
+    int written = snprintf(ptr, json_size,
                            "{\n"
                            "  \"version\": 1,\n"
                            "  \"hash_algo\": \"blake3\",\n"
@@ -229,7 +208,7 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
 
     ptr += written;
 
-    // add chunks info to json file
+    // افزودن اطلاعات چانک‌ها
     for (i = 0; i < state->part_total_count; i++)
     {
         char hash_hex[65];
@@ -248,7 +227,7 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
         ptr += written;
     }
 
-    // end JSON
+    // پایان JSON
     strcpy(ptr, "  ]\n}\n");
 
     // $$ شروع تغییرات برای CID استاندارد - نسخه اصلاح شده
