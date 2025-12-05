@@ -24,7 +24,7 @@
 #define OP_DOWNLOAD_CHUNK 0x91
 #define OP_DOWNLOAD_DONE 0x92
 
-#define DATA_BLOCK_SIZE (256 * 1024)
+#define CHUNCK_BITS (256 * 1024)
 #define HASH_LENGTH 32
 
 static const char *g_sock_path = NULL;
@@ -50,7 +50,7 @@ struct upload_info
 
 void ensure_dir(const char *path)
 {
-    struct stat st = {0};
+    struct stat st ;
     if (stat(path, &st) == -1)
     {
         mkdir(path, 0755);
@@ -113,7 +113,7 @@ void calculate_hash(const uint8_t *data, size_t len, uint8_t *hash)
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
     blake3_hasher_update(&hasher, data, len);
-    blake3_hasher_finalize(&hasher, hash, HASH_SIZE);
+    blake3_hasher_finalize(&hasher, hash, HASH_LENGTH);
 }
 
 char *store_chunk(const unsigned char *data, int len, const unsigned char *hash)
@@ -204,7 +204,7 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
                            "  \"total_size\": %lld,\n"
                            "  \"filename\": \"%s\",\n"
                            "  \"chunks\": [\n",
-                           CHUNK_SIZE, state->file_total_size, state->file_name);
+                           CHUNCK_BITS, state->file_total_size, state->file_name);
 
     ptr += written;
 
@@ -441,7 +441,7 @@ void handle_connection(int cfd)
             upload_state.parts_list = NULL;
 
             // اختصاص بافر برای چانک
-            chunk_buffer = malloc(CHUNK_SIZE);
+            chunk_buffer = malloc(CHUNCK_BITS);
             if (!chunk_buffer)
             {
                 perror("malloc chunk buffer");
