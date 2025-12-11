@@ -50,18 +50,10 @@ struct upload_info
 
 void ensure_dir(const char *path)
 {
-    if (MKDIR(path) == 0)
+    struct stat st;
+    if (stat(path, &st) == -1)
     {
-        // built with ni error
-    }
-    else if (errno == EEXIST)
-    {
-        // dir exist
-    }
-    else
-    {
-        // other error
-        perror("dir")
+        mkdir(path, 0755);
     }
 }
 
