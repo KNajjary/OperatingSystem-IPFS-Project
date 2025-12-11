@@ -1,14 +1,7 @@
-gcc -O2 -pthread -o c_engine c_engine.c -lblake3
+gcc -O2 -pthread -o c_engine c_engine.c
 c_engine.c: In function ‘ensure_dir’:
-c_engine.c:53:12: error: variable ‘st’ has initializer but incomplete type
-   53 |     struct stat st = {0};
-      |            ^~~~
-c_engine.c:53:23: warning: excess elements in struct initializer
-   53 |     struct stat st = {0};
-      |                       ^
-c_engine.c:53:23: note: (near initialization for ‘st’)
 c_engine.c:53:17: error: storage size of ‘st’ isn’t known
-   53 |     struct stat st = {0};
+   53 |     struct stat st ;
       |                 ^~
 c_engine.c:54:9: warning: implicit declaration of function ‘stat’ [-Wimplicit-function-declaration]
    54 |     if (stat(path, &st) == -1)
@@ -16,12 +9,7 @@ c_engine.c:54:9: warning: implicit declaration of function ‘stat’ [-Wimplici
 c_engine.c:56:9: warning: implicit declaration of function ‘mkdir’ [-Wimplicit-function-declaration]
    56 |         mkdir(path, 0755);
       |         ^~~~~
-c_engine.c: In function ‘calculate_hash’:
-c_engine.c:116:43: error: ‘HASH_SIZE’ undeclared (first use in this function)
-  116 |     blake3_hasher_finalize(&hasher, hash, HASH_SIZE);
-      |                                           ^~~~~~~~~
-c_engine.c:116:43: note: each undeclared identifier is reported only once for each function it appears 
-in                                                                                                     c_engine.c: In function ‘store_chunk’:
+c_engine.c: In function ‘store_chunk’:
 c_engine.c:150:17: error: storage size of ‘st’ isn’t known
   150 |     struct stat st;
       |                 ^~
@@ -32,16 +20,14 @@ function-declaration]                                                           
 c_engine.c:158:30: error: ‘O_WRONLY’ undeclared (first use in this function)
   158 |     int fd = open(file_path, O_WRONLY | O_CREAT | O_EXCL, 0644);
       |                              ^~~~~~~~
-c_engine.c:158:41: error: ‘O_CREAT’ undeclared (first use in this function)
+c_engine.c:158:30: note: each undeclared identifier is reported only once for each function it appears 
+in                                                                                                     c_engine.c:158:41: error: ‘O_CREAT’ undeclared (first use in this function)
   158 |     int fd = open(file_path, O_WRONLY | O_CREAT | O_EXCL, 0644);
       |                                         ^~~~~~~
 c_engine.c:158:51: error: ‘O_EXCL’ undeclared (first use in this function)
   158 |     int fd = open(file_path, O_WRONLY | O_CREAT | O_EXCL, 0644);
       |                                                   ^~~~~~
 c_engine.c: In function ‘create_manifest’:
-c_engine.c:207:28: error: ‘CHUNK_SIZE’ undeclared (first use in this function)
-  207 |                            CHUNK_SIZE, state->file_total_size, state->file_name);
-      |                            ^~~~~~~~~~
 c_engine.c:262:17: warning: implicit declaration of function ‘base32_encode’ [-Wimplicit-function-decla
 ration]                                                                                                  262 |     char *cid = base32_encode(multicodec_data, 2 + 2 + HASH_LENGTH); // 36 بایت
       |                 ^~~~~~~~~~~~~
@@ -69,11 +55,8 @@ c_engine.c:426:34: error: ‘upload_state’ undeclared (first use in this funct
   426 |             cleanup_upload_info(&upload_state);
       |                                  ^~~~~~~~~~~~
 c_engine.c:444:13: error: ‘chunk_buffer’ undeclared (first use in this function)
-  444 |             chunk_buffer = malloc(CHUNK_SIZE);
+  444 |             chunk_buffer = malloc(CHUNCK_BITS);
       |             ^~~~~~~~~~~~
-c_engine.c:444:35: error: ‘CHUNK_SIZE’ undeclared (first use in this function)
-  444 |             chunk_buffer = malloc(CHUNK_SIZE);
-      |                                   ^~~~~~~~~~
 c_engine.c:524:22: warning: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target
  type [-Wdiscarded-qualifiers]                                                                           524 |                 free(cid);
       |                      ^~~

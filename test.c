@@ -595,3 +595,4 @@ char *create_simple_cid(struct upload_info *state, char **manifest_json)
 
     return cid;
 }
+
