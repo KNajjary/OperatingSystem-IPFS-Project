@@ -1,4 +1,4 @@
-
+#python main.py
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import socket
