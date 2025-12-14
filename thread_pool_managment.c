@@ -83,7 +83,6 @@ typedef enum {
     TASK_TYPE_WRITE_FILE         // وظیفه نوشتن فایل (برای استفاده‌های عمومی)
                                  // می‌تواند برای عملیات‌های I/O دیگر استفاده شود
     
-    // می‌توانید انواع وظایف دیگر را اینجا اضافه کنید
     // مثال: TASK_TYPE_DELETE_FILE, TASK_TYPE_VALIDATE_CHUNK
 } task_type_t;
 
@@ -118,7 +117,6 @@ typedef struct {
             uint8_t hash[HASH_LENGTH];  // بافر خروجی برای ذخیره هش محاسبه شده
         } hash;
         
-        // می‌توانید انواع داده دیگر را اینجا اضافه کنید
         // struct { ... } write_file;
         // struct { ... } delete_file;
         
