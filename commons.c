@@ -1,85 +1,6 @@
 //در این فایل بخشی از کد که بین آپلود و دانلود مشترک استفاده می شود قرار دارد
 
-// ==================== ساختارهای داده ====================
 
-// ساختار برای ذخیره اطلاعات هر چانک
-typedef struct {
-    char hash_hex[65];          // هش هگزادسیمال
-    char *file_path;            // مسیر فایل
-    int ref_count;              // شمارنده مرجع
-    pthread_mutex_t lock;       // قفل برای این چانک
-    time_t last_access;         // زمان آخرین دسترسی
-} chunk_entry_t;
-
-// ساختار برای ذخیره اطلاعات مانیفست
-typedef struct {
-    char *cid;                  // CID
-    char *manifest_path;        // مسیر فایل مانیفست
-    int reader_count;           // تعداد خوانندگان همزمان
-    pthread_rwlock_t rwlock;    // قفل خواننده/نویسنده
-} manifest_entry_t;
-
-// ساختار وظیفه برای Thread Pool
-typedef struct {
-    void (*task_func)(void*);   // تابع وظیفه
-    void *arg;                  // آرگومان تابع
-    int task_id;                // شناسه وظیفه
-} task_t;
-
-// Thread Pool
-typedef struct {
-    pthread_t workers[MAX_THREADS]; // کارگران
-    task_t task_queue[MAX_TASKS];   // صف وظایف
-    int queue_size;                 // اندازه صف
-    int queue_front;                // ابتدای صف
-    int queue_rear;                 // انتهای صف
-    int shutdown;                   // وضعیت خاموشی
-    pthread_mutex_t queue_lock;     // قفل صف
-    pthread_cond_t queue_not_empty; // شرط پر نبودن صف
-    pthread_cond_t queue_not_full;  // شرط پر بودن صف
-} thread_pool_t;
-// 3. ساختار وظیفه خواندن چانک برای Thread Pool
-typedef struct read_chunk_task {
-    download_state_t *dl_state;     // اشاره‌گر به وضعیت دانلود مربوطه
-    int chunk_index;                // شماره چانک (0-based)
-    char *chunk_hash;               // هش چانک برای تأیید صحت
-    char *chunk_path;               // مسیر کامل فایل چانک
-    size_t expected_size;           // اندازه مورد انتظار چانک
-    struct read_chunk_task *next;   // برای صف پیوندی
-} read_chunk_task_t;
-
-// 4. ساختار برای صف وظایف چانک‌ها
-typedef struct {
-    read_chunk_task_t *head;        // ابتدای صف
-    read_chunk_task_t *tail;        // انتهای صف
-    int count;                      // تعداد وظایف در صف
-    pthread_mutex_t lock;           // قفل صف
-    pthread_cond_t not_empty;       // شرط پر نبودن صف
-    pthread_cond_t not_full;        // شرط پر بودن صف
-    int max_size;                   // حداکثر اندازه صف
-} chunk_task_queue_t;
-
-// 5. ساختار برای ذخیره کَش مانیفست‌ها
-typedef struct {
-    manifest_info_t **table;        // جدول هش برای مانیفست‌ها
-    int size;                       // اندازه جدول
-    int capacity;                   // ظرفیت جدول
-    pthread_mutex_t lock;           // قفل جدول
-    int max_capacity;               // حداکثر تعداد مانیفست‌ها در کَش
-    manifest_info_t *lru_head;      // برای الگوریتم LRU
-    manifest_info_t *lru_tail;      // برای الگوریتم LRU
-} manifest_cache_t;
-
-// 6. ساختار برای ادغام‌کننده ترتیبی (Sequential Merger)
-typedef struct {
-    download_state_t *dl_state;     // وضعیت دانلود مربوطه
-    int window_size;                // اندازه پنجره برای ارسال
-    int *window;                    // پنجره چانک‌های در حال ارسال
-    int window_start;               // شروع پنجره
-    int window_end;                 // پایان پنجره
-    pthread_mutex_t lock;           // قفل ادغام‌کننده
-    pthread_cond_t window_cond;     // شرط تغییر پنجره
-} sequential_merger_t;
 
 
 // ایجاد پوشه
@@ -108,104 +29,6 @@ void hash_to_hex(const uint8_t *hash, char *hex) {
     hex[64] = '\0';
 }
 
-// ==================== مدیریت Thread Pool ====================
-
-void *worker_thread(void *arg) {
-    thread_pool_t *pool = (thread_pool_t *)arg;
-   
-    while (1) {
-        pthread_mutex_lock(&pool->queue_lock);
-       
-        // منتظر بودن تا صف خالی نباشد
-        while (pool->queue_size == 0 && !pool->shutdown) {
-            pthread_cond_wait(&pool->queue_not_empty, &pool->queue_lock);
-        }
-       
-        if (pool->shutdown) {
-            pthread_mutex_unlock(&pool->queue_lock);
-            pthread_exit(NULL);
-        }
-       
-        // گرفتن وظیفه از صف
-        task_t task = pool->task_queue[pool->queue_front];
-        pool->queue_front = (pool->queue_front + 1) % MAX_TASKS;
-        pool->queue_size--;
-       
-        // اطلاع به تولیدکنندگان که جا خالی شده
-        pthread_cond_signal(&pool->queue_not_full);
-        pthread_mutex_unlock(&pool->queue_lock);
-       
-        // اجرای وظیفه
-        task.task_func(task.arg);
-       
-        // آزادسازی حافظه آرگومان
-        free(task.arg);
-    }
-   
-    return NULL;
-}
-
-int thread_pool_init(thread_pool_t *pool) {
-    pool->queue_size = 0;
-    pool->queue_front = 0;
-    pool->queue_rear = 0;
-    pool->shutdown = 0;
-   
-    pthread_mutex_init(&pool->queue_lock, NULL);
-    pthread_cond_init(&pool->queue_not_empty, NULL);
-    pthread_cond_init(&pool->queue_not_full, NULL);
-   
-    // ایجاد کارگران
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (pthread_create(&pool->workers[i], NULL, worker_thread, pool) != 0) {
-            return -1;
-        }
-    }
-   
-    return 0;
-}
-
-int thread_pool_submit(thread_pool_t *pool, void (*task_func)(void*), void *arg, int task_id) {
-    pthread_mutex_lock(&pool->queue_lock);
-   
-    // منتظر بودن تا صف پر نباشد
-    while (pool->queue_size == MAX_TASKS && !pool->shutdown) {
-        pthread_cond_wait(&pool->queue_not_full, &pool->queue_lock);
-    }
-   
-    if (pool->shutdown) {
-        pthread_mutex_unlock(&pool->queue_lock);
-        return -1;
-    }
-   
-    // اضافه کردن وظیفه به صف
-    pool->task_queue[pool->queue_rear].task_func = task_func;
-    pool->task_queue[pool->queue_rear].arg = arg;
-    pool->task_queue[pool->queue_rear].task_id = task_id;
-    pool->queue_rear = (pool->queue_rear + 1) % MAX_TASKS;
-    pool->queue_size++;
-   
-    // اطلاع به کارگران
-    pthread_cond_signal(&pool->queue_not_empty);
-    pthread_mutex_unlock(&pool->queue_lock);
-   
-    return 0;
-}
-
-void thread_pool_shutdown(thread_pool_t *pool) {
-    pthread_mutex_lock(&pool->queue_lock);
-    pool->shutdown = 1;
-    pthread_mutex_unlock(&pool->queue_lock);
-   
-    // بیدار کردن تمام کارگران
-    pthread_cond_broadcast(&pool->queue_not_empty);
-    pthread_cond_broadcast(&pool->queue_not_full);
-   
-    // منتظر ماندن برای تمام شدن کارگران
-    for (int i = 0; i < MAX_THREADS; i++) {
-        pthread_join(pool->workers[i], NULL);
-    }
-}
 
 // ذخیره مانیفست (با نوشتن اتمیک)
 int store_manifest(const char *cid, const char *manifest_json)
@@ -249,4 +72,222 @@ int store_manifest(const char *cid, const char *manifest_json)
 
     printf("[ENGINE] Stored manifest: %s\n", cid);
     return 0;
+}
+//==========================================================================
+// محاسبه هش (از BLAKE3 یا SHA256)
+void calculate_hash(const uint8_t *data, size_t len, uint8_t *hash) {
+    
+    
+    if (strcmp(HASH_ALGO , "sha256") == 0) // comaring tow strings, return 0 if equal
+    {
+        SHA256(data, len, hash);
+    } 
+    else if (strcmp(HASH_ALGO , "blake3") == 0)
+    {
+        // پیش‌فرض: BLAKE3
+        // فاطمه این تکه کدی که با هم زدیمه
+
+        blake3_hasher hasher;
+        blake3_hasher_init(&hasher);
+        blake3_hasher_update(&hasher, data, len);
+        blake3_hasher_finalize(&hasher, hash, HASH_LENGTH);
+    }
+    /*
+    //----because i cant compile with blake3
+    // مقدار اولیه هش
+    uint32_t hash_value = 5381;  // مقدار اولیه مشهور در الگوریتم DJB2
+    
+    // محاسبه هش برای داده ورودی
+    for (size_t i = 0; i < len; i++) {
+        hash_value = ((hash_value << 5) + hash_value) + data[i];  // hash * 33 + data[i]
+    }
+    
+    // تبدیل مقدار 32 بیتی هش به آرایه 32 بایتی
+    // (می‌توانیم آن را تکرار کنیم یا با روش‌های دیگر ترکیب کنیم)
+    for (int i = 0; i < HASH_LENGTH; i++) {
+        // استفاده از بایت‌های مختلف از hash_value با اعمال شیفت
+        hash[i] = (uint8_t)(hash_value >> ((i % 4) * 8));
+        
+        // برای افزایش پیچیدگی، می‌توانیم عملیات اضافی انجام دهیم
+        hash[i] ^= (uint8_t)(i * 0x1F);  // XOR با یک مقدار ثابت
+    }
+        */
+}
+
+// $$ تابع اصلاح شده برای کدگذاری base32
+char *base32_encode(const unsigned char *data, int len)
+{
+    const char *base32_chars = "abcdefghijklmnopqrstuvwxyz234567";
+
+    // محاسبه دقیق اندازه خروجی
+    int output_len = (len * 8 + 4) / 5;     // تعداد کاراکترهای خروجی
+    char *encoded = malloc(output_len + 1); // +1 برای نال ترمینیتور
+    if (!encoded)
+        return NULL;
+
+    int bit_buffer = 0;
+    int bit_count = 0;
+    int out_index = 0;
+
+    for (int i = 0; i < len; i++)
+    {
+        bit_buffer = (bit_buffer << 8) | data[i];
+        bit_count += 8;
+
+        while (bit_count >= 5)
+        {
+            int index = (bit_buffer >> (bit_count - 5)) & 0x1F;
+            encoded[out_index++] = base32_chars[index];
+            bit_count -= 5;
+        }
+    }
+
+    // باقی‌مانده بیت‌ها
+    if (bit_count > 0)
+    {
+        // باقی‌مانده بیت‌ها را به چپ تراز می‌کنیم
+        int index = (bit_buffer << (5 - bit_count)) & 0x1F;
+        encoded[out_index++] = base32_chars[index];
+    }
+
+    encoded[out_index] = '\0';
+    return encoded;
+}
+//=====================================================
+// $$ تابع اصلاح شده برای ایجاد مانیفست
+char *create_manifest(struct upload_info *state, char **manifest_json)
+{
+    // محاسبه اندازه مورد نیاز برای JSON
+    int json_size = 1024; // اندازه پایه
+    int i;
+    for (i = 0; i < state->part_total_count; i++)
+    {
+        json_size += 256; // برای هر چانک
+    }
+
+    *manifest_json = malloc(json_size);
+    if (!*manifest_json)
+    {
+        perror("malloc *manifest_json");
+        return NULL;
+    }
+
+    // شروع ساخت JSON
+    char *ptr = *manifest_json;
+    int written = snprintf(ptr, json_size,
+                           "{\n"
+                           "  \"version\": 1,\n"
+                           "  \"hash_algo\": \"%s\",\n"
+                           "  \"chunk_size\": %d,\n"
+                           "  \"total_size\": %lld,\n"
+                           "  \"filename\": \"%s\",\n"
+                           "  \"chunks\": [\n",
+                           HASH_ALGO,CHUNCK_BITS, state->file_total_size, state->file_name);
+
+    ptr += written;
+
+    // افزودن اطلاعات چانک‌ها
+    for (i = 0; i < state->part_total_count; i++)
+    {
+        char hash_hex[65];
+        int j;
+        for (j = 0; j < HASH_LENGTH; j++)
+        {
+            sprintf(hash_hex + j * 2, "%02x", state->parts_list[i].hash_code[j]);
+        }
+        hash_hex[64] = '\0';
+
+        written = snprintf(ptr, (*manifest_json + json_size) - ptr,
+                           "    {\"index\": %d, \"size\": %d, \"hash\": \"%s\"}%s\n",
+                           state->parts_list[i].part_num, state->parts_list[i].part_size, hash_hex,
+                           (i == state->part_total_count - 1) ? "" : ",");
+
+        ptr += written;
+    }
+
+    // پایان JSON
+    strcpy(ptr, "  ]\n}\n");
+    // تولید CID
+    return generate_cid(*manifest_json);
+
+
+}
+//=========================================================
+
+// تولید CID
+char *generate_cid(const char *manifest_json) {
+    // $$ شروع تغییرات برای CID استاندارد - نسخه اصلاح شده
+
+    // 1. serialize(manifest) - همان JSON ساخته شده
+    unsigned char *serialized_manifest = (unsigned char *)*manifest_json;
+    int manifest_len = strlen(*manifest_json);
+
+    // 2. multihash(serialize(manifest))
+    unsigned char manifest_hash[HASH_LENGTH];
+    calculate_hash(serialized_manifest, manifest_len, manifest_hash);
+
+    // ساخت multihash: [کد-الگوریتم, طول-هش, هش-داده]
+    unsigned char multihash[2 + HASH_LENGTH];
+    multihash[0] = 0x1e;        // کد BLAKE3 در جدول multihash (0x1e = 30)
+    multihash[1] = HASH_LENGTH; // طول هش (32 بایت = 0x20)
+    memcpy(multihash + 2, manifest_hash, HASH_LENGTH);
+
+    unsigned char multicodec_data[2 + 2 + HASH_LENGTH]; // 36 بایت
+
+    // کد multicodec برای dag-json: 0x0129 = 297
+    unsigned int dag_json_code = 0x0129; // 297
+
+    // کدگذاری Varint برای 297
+    multicodec_data[0] = (dag_json_code >> 7) | 0x80; // 0x82
+    multicodec_data[1] = (dag_json_code & 0x7F);      // 0x29
+
+    // کپی multihash
+    memcpy(multicodec_data + 2, multihash, 2 + HASH_LENGTH);
+
+    // 4. multibase(base32)
+    char *cid = base32_encode(multicodec_data, 2 + 2 + HASH_LENGTH); // 36 بایت
+    char *final_cid = malloc(strlen(cid) + 2);
+    if (!final_cid)
+    {
+        free(cid);
+        perror("malloc final_cid");
+        return NULL;
+    }
+
+    sprintf(final_cid, "b%s", cid); // "b" برای base32
+
+    free(cid);
+    return final_cid;
+
+    // $$ پایان تغییرات برای CID استاندارد
+
+    /*
+    // محاسبه هش مانیفست
+    uint8_t manifest_hash[HASH_LENGTH];
+    compute_hash((const uint8_t*)manifest_json, strlen(manifest_json), manifest_hash);
+   
+    // ساخت multihash: [کد-الگوریتم, طول-هش, هش]
+    uint8_t multihash[2 + HASH_LENGTH];
+    multihash[0] = 0x1e;        // کد BLAKE3 در multihash
+    multihash[1] = HASH_LENGTH;
+    memcpy(multihash + 2, manifest_hash, HASH_LENGTH);
+   
+    // ساخت multicodec + multihash
+    uint8_t multicodec_data[2 + 2 + HASH_LENGTH];
+    unsigned int dag_json_code = 0x0129; // کد dag-json
+   
+    // کدگذاری Varint
+    multicodec_data[0] = (dag_json_code >> 7) | 0x80;
+    multicodec_data[1] = dag_json_code & 0x7F;
+    memcpy(multicodec_data + 2, multihash, 2 + HASH_LENGTH);
+   
+    // کدگذاری Base32
+    char *base32 = base32_encode(multicodec_data, 2 + 2 + HASH_LENGTH);
+    if (!base32) return NULL;
+   
+    char *cid = malloc(strlen(base32) + 2);
+    sprintf(cid, "b%s", base32);
+    free(base32);
+   
+    return cid;*/
 }
