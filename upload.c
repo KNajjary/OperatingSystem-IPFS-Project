@@ -51,7 +51,7 @@ void handle_upload_chunk(int client_fd, const uint8_t *payload, uint32_t len,
     // تخصیص حافظه برای چانک جدید
     if (state->chunks == NULL) {
         // تخمین تعداد چانک‌ها
-        state->chunk_count = (len + CHUNCK_SIZE - 1) / CHUNCK_SIZE;
+        state->chunk_count = (len + _SIZE - 1) / CHUNK_SIZE;
         state->chunks = malloc(state->chunk_count * sizeof(state->chunks[0]));
         memset(state->chunks, 0, state->chunk_count * sizeof(state->chunks[0]));
     }

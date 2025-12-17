@@ -456,6 +456,68 @@ static void process_download_chunk_task(task_t *task) {
     // توجه: callback در execute_task فراخوانی می‌شود، نه اینجا
 }
 
+/**
+ * تابع process_download_chunk_task برای Thread Pool (متناسب با ساختار task_t شما)
+ */
+/*
+ static void process_download_chunk_task(task_t *task){
+    // *** استخراج پارامترها
+    download_state_t *state = task->data.download.download_state;
+    int chunk_index = task->data.download.chunk_index;
+    const char *chunk_hash = task->data.download.chunk_hash;
+    const char *chunk_path = task->data.download.chunk_path;
+    size_t expected_size = task->data.download.expected_size;
+    
+    printf("[THREAD POOL] Processing chunk %d\n", chunk_index);
+    
+    // *** ۱. راستی‌آزمایی چانک (با قفل‌گذاری ایمن)
+    // تبدیل hash string به باینری
+    uint8_t hash_binary[HASH_LENGTH];
+    for (int i = 0; i < HASH_LENGTH; i++) {
+        sscanf(chunk_hash + i * 2, "%2hhx", &hash_binary[i]);
+    }
+    
+    if (verify_chunk_safe(chunk_path, hash_binary) < 0) {
+        printf("[THREAD POOL] ERROR: Chunk %d verification failed\n", chunk_index);
+        if (task->callback) {
+            task->callback(task->callback_arg, -1);
+        }
+        return;
+    }
+    
+    // *** ۲. خواندن چانک (با قفل‌گذاری ایمن)
+    long chunk_file_size;
+    unsigned char *chunk_data = read_chunk_file_safe(chunk_path, &chunk_file_size);
+    if (!chunk_data || chunk_file_size != expected_size) {
+        printf("[THREAD POOL] ERROR: Cannot read chunk %d file: %s\n", 
+               chunk_index, chunk_path);
+        if (chunk_data) free(chunk_data);
+        if (task->callback) {
+            task->callback(task->callback_arg, -1);
+        }
+        return;
+    }
+    
+    // *** ۳. ذخیره داده‌ها در وضعیت دانلود (تحت قفل)
+    pthread_mutex_lock(&state->lock);
+    
+    if (chunk_index < state->total_chunks) {
+        state->chunk_data[chunk_index] = chunk_data;
+        state->chunk_sizes[chunk_index] = chunk_file_size;
+        // chunk_ready در callback تنظیم می‌شود
+    } else {
+        free(chunk_data);
+    }
+    
+    pthread_mutex_unlock(&state->lock);
+    
+    printf("[THREAD POOL] Chunk %d processed successfully (%ld bytes)\n", 
+           chunk_index, chunk_file_size);
+    
+    // *** ۴. فراخوانی callback (در execute_task انجام می‌شود)
+    // موفقیت - callback با کد 0 فراخوانی می‌شود
+}
+*/
 // ارسال وظیفه به Thread Pool برای اجرا
 int thread_pool_submit_task(task_t *task) {
     // بررسی پارامترهای ورودی

@@ -182,7 +182,7 @@ char *create_manifest(struct upload_info *state, char **manifest_json)
                            "  \"total_size\": %lld,\n"
                            "  \"filename\": \"%s\",\n"
                            "  \"chunks\": [\n",
-                           HASH_ALGO,CHUNCK_BITS, state->file_total_size, state->file_name);
+                           HASH_ALGO,CHUNK_SIZE, state->file_total_size, state->file_name);
 
     ptr += written;
 

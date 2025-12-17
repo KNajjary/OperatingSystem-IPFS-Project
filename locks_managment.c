@@ -2,76 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
-#define CID_MAX_LEN 128
-#define LOCK_TABLE_SIZE 64  // اندازه جدول هش
+#include "structs.c"
 
 
-// ==================== ساختارهای داده ====================
 
-// ساختار برای ذخیره اطلاعات هر چانک
-typedef struct {
-    char hash_hex[65];          // هش هگزادسیمال
-    char *file_path;            // مسیر فایل
-    int ref_count;              // شمارنده مرجع
-    pthread_mutex_t lock;       // قفل برای این چانک
-    time_t last_access;         // زمان آخرین دسترسی
-} chunk_entry_t;
 
-// ساختار برای ذخیره اطلاعات مانیفست
-typedef struct {
-    char *cid;                  // CID
-    char *manifest_path;        // مسیر فایل مانیفست
-    int reader_count;           // تعداد خوانندگان همزمان
-    pthread_rwlock_t rwlock;    // قفل خواننده/نویسنده
-} manifest_entry_t;
-
-// 1. ساختار اطلاعات مانیفست با قفل خواننده/نویسنده
-typedef struct manifest_info {
-    char *cid;                      // CID (مثلاً "bciq2k...")
-    char *manifest_json;            // محتوای JSON مانیفست
-    int ref_count;                  // تعداد خوانندگان فعال همزمان
-    pthread_rwlock_t rwlock;        // قفل خواننده/نویسنده برای دسترسی همزمان
-    time_t last_access;             // زمان آخرین دسترسی (برای LRU cache)
-    struct manifest_info *next;     // برای لیست پیوندی/هش‌تگل
-    int chunk_count;                // تعداد چانک‌ها در این مانیفست
-    char **chunk_hashes;            // آرایه هش‌های چانک‌ها
-    int *CHUNCK_BITSs;
-
-    char *filename;
-    long long total_size;
-    //struct file_part *chunks;               // آرایه اندازه‌های چانک‌ها
-} manifest_info_t;
-
-// 5. ساختار برای ذخیره کَش مانیفست‌ها
-typedef struct {
-    manifest_info_t **table;        // جدول هش برای مانیفست‌ها
-    int size;                       // اندازه جدول
-    int capacity;                   // ظرفیت جدول
-    pthread_mutex_t lock;           // قفل جدول
-    int max_capacity;               // حداکثر تعداد مانیفست‌ها در کَش
-    manifest_info_t *lru_head;      // برای الگوریتم LRU
-    manifest_info_t *lru_tail;      // برای الگوریتم LRU
-} manifest_cache_t;
-
-// 6. ساختار برای ادغام‌کننده ترتیبی (Sequential Merger)
-typedef struct {
-    download_state_t *dl_state;     // وضعیت دانلود مربوطه
-    int window_size;                // اندازه پنجره برای ارسال
-    int *window;                    // پنجره چانک‌های در حال ارسال
-    int window_start;               // شروع پنجره
-    int window_end;                 // پایان پنجره
-    pthread_mutex_t lock;           // قفل ادغام‌کننده
-    pthread_cond_t window_cond;     // شرط تغییر پنجره
-} sequential_merger_t;
-
-// ساختار entry برای قفل
-typedef struct manifest_lock_entry {
-    char cid[CID_MAX_LEN];
-    pthread_rwlock_t rwlock;          // قفل خواندن/نوشتن برای این CID
-    int ref_count;                    // شمارنده استفاده‌کنندگان
-    struct manifest_lock_entry *next; // برای پیوند لیست
-} manifest_lock_entry_t;
 
 // جدول هش برای مدیریت قفل‌ها
 typedef struct {
@@ -321,10 +256,12 @@ int manifest_write_lock(const char *cid) {
 // تابع trylock برای جلوگیری از deadlock
 // نسخه بهبود یافته با مدیریت خطای بهتر
 // کدهای بازگشتی تابع
+/*
 #define LOCK_SUCCESS       0
 #define LOCK_FAILED       -1  // خطای عمومی
 #define LOCK_TIMEOUT      -2  // timeout رسیده
 #define LOCK_NO_MEMORY    -3  // حافظه کافی نیست
+*/
 int manifest_write_trylock(const char *cid, int timeout_seconds) {
     manifest_lock_entry_t *entry;
     struct timespec timeout;

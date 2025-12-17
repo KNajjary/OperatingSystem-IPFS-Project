@@ -1,4 +1,4 @@
-// Build: gcc -O2 -pthread -o c_engine c_engine.c
+// Build: gcc -O2 -pthread -o c_engine c_engine.c -w -n
 // Run:   ./c_engine /tmp/cengine.sock
 
 #define _GNU_SOURCE
@@ -15,14 +15,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <blake3.h>
-#include "blake3/blake3.h"
+//#include <blake3.h>
+//#include "blake3/blake3.h"
 //#include <openssl/sha.h>
 #include <time.h>
 #include "download.c"
 #include "upload.c"'
 #include "thread_pool_managment.c"
 #include "locks_managment.c"
+#include "structs.c"
 
 // ==================== تعریف ثابت‌ها ====================
 #define OP_UPLOAD_START    0x01
@@ -44,29 +45,14 @@ E_BUSY
 E_PROTO
 */
 
-#define CHUNCK_BITS         (256 * 1024)  // 256KB
-#define HASH_LENGTH        32
-#define MAX_THREADS        8
-#define MAX_TASKS          100
-#define CID_PREFIX         "b"
 
-#define HASH_ALGO "blake3"
 // ==================== متغیرهای سراسری ====================
 static const char *g_sock_path = NULL;
-static const char *BLOCKS_DIR = "blocks";
-static const char *MANIFESTS_DIR = "manifests";
 
 
 
-// جدول هش برای چانک‌ها (ساده‌شده)
-static chunk_entry_t **chunk_table = NULL;
-static int chunk_table_size = 0;
-static pthread_mutex_t chunk_table_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// جدول مانیفست‌ها
-static manifest_entry_t **manifest_table = NULL;
-static int manifest_table_size = 0;
-static pthread_mutex_t manifest_table_lock = PTHREAD_MUTEX_INITIALIZER;
+
 
 
 // ==================== توابع خودشان ====================
@@ -266,7 +252,7 @@ int main(int argc, char **argv) {
    
     printf("[ENGINE] Server started on %s\n", g_sock_path);
     printf("[ENGINE] Thread pool: %d threads\n", MAX_THREADS);
-    printf("[ENGINE] Chunk size: %d KB\n", CHUNCK_BITS / 1024);
+    printf("[ENGINE] Chunk size: %d KB\n", CHUNK_SIZE / 1024);
    
     // حلقه اصلی
     while (1) {
