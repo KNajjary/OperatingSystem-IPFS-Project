@@ -23,7 +23,7 @@
 #include "upload.c"'
 #include "thread_pool_managment.c"
 #include "locks_managment.c"
-#include "structs.c"
+//#include "structs.c"
 
 // ==================== تعریف ثابت‌ها ====================
 #define OP_UPLOAD_START    0x01

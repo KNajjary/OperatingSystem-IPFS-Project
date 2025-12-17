@@ -486,6 +486,27 @@ int decrement_manifest_ref(const char *cid) {
     }
 }
 
+// *** تابع task برای پاک‌سازی
+void cleanup_manifest_task(void *arg) {
+    manifest_entry_t *entry = (manifest_entry_t*)arg;
+    
+    pthread_mutex_lock(&entry->lock);
+    
+    // *** آزادسازی اطلاعات مانیفست
+    if (entry->manifest_info) {
+        cleanup_manifest_info(entry->manifest_info);
+        free(entry->manifest_info);
+        entry->manifest_info = NULL;
+    }
+    
+    printf("[MANIFEST] Cleaned up manifest for CID: %s\n", entry->cid);
+    
+    pthread_mutex_unlock(&entry->lock);
+    
+    // *** تخریب قفل و آزادسازی حافظه
+    pthread_mutex_destroy(&entry->lock);
+    free(entry);
+}
 /**
  * برنامه‌ریزی پاک‌سازی مانیفست
  */
@@ -494,27 +515,7 @@ void schedule_manifest_cleanup(manifest_entry_t *entry) {
     
     printf("[MANIFEST] Scheduling cleanup for manifest: %s\n", entry->cid);
     
-    // *** تابع task برای پاک‌سازی
-    void cleanup_manifest_task(void *arg) {
-        manifest_entry_t *entry = (manifest_entry_t*)arg;
-        
-        pthread_mutex_lock(&entry->lock);
-        
-        // *** آزادسازی اطلاعات مانیفست
-        if (entry->manifest_info) {
-            cleanup_manifest_info(entry->manifest_info);
-            free(entry->manifest_info);
-            entry->manifest_info = NULL;
-        }
-        
-        printf("[MANIFEST] Cleaned up manifest for CID: %s\n", entry->cid);
-        
-        pthread_mutex_unlock(&entry->lock);
-        
-        // *** تخریب قفل و آزادسازی حافظه
-        pthread_mutex_destroy(&entry->lock);
-        free(entry);
-    }
+    
     
     // *** ارسال به Thread Pool یا اجرای مستقیم
     // گزینه ۱: Thread Pool

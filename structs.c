@@ -1,3 +1,5 @@
+// structs.c
+
 typedef struct download_state download_state_t;
 typedef struct chunk_entry chunk_entry_t;
 typedef struct manifest_entry manifest_entry_t;
@@ -91,7 +93,7 @@ chunk_entry_t {
     long long total_size;
     //struct file_part *chunks;               // آرایه اندازه‌های چانک‌ها
 } ;*/
-struct manifest_info
+manifest_info_t
 {
     char *filename;
     long long total_size;
