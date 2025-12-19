@@ -17,7 +17,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdatomic.h>
-#include <openssl/sha.h>
+#include <openssl/sha.h> //for hash
 #include <dirent.h>
 
 // ==================== تعریف ثابت‌ها ====================
@@ -296,16 +296,6 @@ int send_frame(int fd, uint8_t op, const void* payload, uint32_t len) {
     if (len && write_all(fd, payload, len) < 0) return -1;
     return 0;
 }
-// ارسال فریم
-/*int send_frame(int fd, uint8_t op, const void* payload, uint32_t len) {
-    uint8_t header[5];
-    header[0] = op;
-    uint32_t be_len = htonl(len);
-    memcpy(header + 1, &be_len, 4);
-    if (write_all(fd, header, 5) < 0) return -1;
-    if (len && write_all(fd, payload, len) < 0) return -1;
-    return 0;
-}*/
 //===================================================================
 // ارسال خطا
 int send_error(int fd, const char *code, const char *message) {
@@ -335,10 +325,26 @@ int hex_to_hash(const char *hex, uint8_t *hash) {
 
 // محاسبه هش SHA256
 void compute_hash(const uint8_t *data, size_t len, uint8_t *hash) {
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, data, len);
-    SHA256_Final(hash, &sha256);
+    if ( strcmp(HASH_ALGO,"sha256") == 0){
+        SHA256_CTX sha256;
+        SHA256_Init(&sha256);
+        SHA256_Update(&sha256, data, len);
+        SHA256_Final(hash, &sha256);
+
+    }
+    /*else if (strcmp(HASH_ALGO , "blake3") == 0)
+    {
+        // فاطمه این تکه کدی که با هم زدیمه
+
+        blake3_hasher hasher;
+        blake3_hasher_init(&hasher);
+        blake3_hasher_update(&hasher, data, len);
+        blake3_hasher_finalize(&hasher, hash, HASH_LENGTH);
+        
+    }*/
+    hash = NULL;
+
+    
 }
 
 // کدگذاری base32
@@ -645,7 +651,7 @@ int store_manifest(const char *cid, const char *manifest_json) {
         return -1;
     }
     
-    fsync(fd);
+    fsync(fd);//اطمینان از نوشته شدن داده بر روی دیسک
     close(fd);
     
     // تغییر نام اتمیک
@@ -1557,19 +1563,57 @@ void handle_upload_finish(int client_fd, upload_state_t *state) {
 
 // ==================== توابع دانلود ====================
 
+typedef struct {
+    int chunk_index;
+    download_state_t *state;
+} chunk_cb_arg_t;
+
+
+
+// تابع callback به‌روزرسانی شده:
+void download_chunk_callback(void *arg, int result) {
+    chunk_cb_arg_t *cb_arg = (chunk_cb_arg_t*)arg;
+    download_state_t *state = cb_arg->state;
+    int chunk_index = cb_arg->chunk_index;
+    
+    pthread_mutex_lock(&state->lock);
+    
+    // اگر خطا در دانلود بود، وضعیت را به -1 تغییر بده
+    if (result != 0) {
+        state->chunk_ready[chunk_index] = -1;
+        printf("[CALLBACK] Chunk %d download failed\n", chunk_index);
+    }
+    // اگر موفق بود، وضعیت قبلاً توسط worker به 1 تغییر کرده
+    
+    // کاهش tasks_remaining
+    state->tasks_remaining--;
+    printf("[CALLBACK] Chunk %d done, %d tasks remaining\n", 
+           chunk_index, state->tasks_remaining);
+    
+    // اگر همه کارها تمام شدند، سیگنال بده
+    if (state->tasks_remaining == 0) {
+        pthread_cond_signal(&state->all_tasks_done_cond);
+    }
+    
+    pthread_mutex_unlock(&state->lock);
+    free(cb_arg);
+}
+/*
+// callback برای اتمام پردازش چانک دانلود
+void download_chunk_callback(void *arg, int result) {
+    int *chunk_index_ptr = (int*)arg;
+    int chunk_index = *chunk_index_ptr;
+    download_state_t *state = NULL;
+    
+    // یافتن state مربوطه (در این نسخه ساده، از آرگومان استفاده می‌کنیم)
+    // در نسخه واقعی باید state را از جای دیگری بگیریم
+    free(chunk_index_ptr);
+}*/
+
 // شروع دانلود
 void download_start(int client_fd, const char *cid,download_state_t* state) {
-    //printf("[ENGINE] DOWNLOAD_START: cid=\"%s\"\n", cid);
-    /*
-    // ساختار وضعیت دانلود
-typedef struct download_state {
+    printf("[ENGINE] DOWNLOAD_START started : cid=\"%s\"\n", cid);
     
-    uint8_t **chunk_data;
-    size_t *chunk_sizes;
-    int *chunk_ready;
-        
-} download_state_t;
-    */
     // اعتبارسنجی CID
     //printf("hi?");
     if (strlen(cid) < 10) {
@@ -1677,6 +1721,7 @@ typedef struct download_state {
     pthread_cond_init(&state->chunk_sent_cond, NULL);
     pthread_cond_init(&state->all_tasks_done_cond, NULL);
     
+    
     // AFTER ALL CHUNKS ARE LOADED, signal the condition variable
     pthread_mutex_lock(&state->lock);
     state->next_expected_index = 0;  // We're ready to send from index 0
@@ -1701,22 +1746,11 @@ typedef struct download_state {
     return ;//state;
 }
 
-// callback برای اتمام پردازش چانک دانلود
-void download_chunk_callback(void *arg, int result) {
-    int *chunk_index_ptr = (int*)arg;
-    int chunk_index = *chunk_index_ptr;
-    download_state_t *state = NULL;
-    
-    // یافتن state مربوطه (در این نسخه ساده، از آرگومان استفاده می‌کنیم)
-    // در نسخه واقعی باید state را از جای دیگری بگیریم
-    free(chunk_index_ptr);
-}
-
 // دانلود چانک‌ها با Thread Pool
 int download_chunks(download_state_t *state) {
     if (!state) return -1;
     
-    printf("[ENGINE] Starting parallel download of %d chunks\n", state->total_chunks);
+    printf("[ENGINE] download_chunks Starting parallel download of %d chunks\n", state->total_chunks);
     
     int tasks_submitted = 0;
     
@@ -1808,7 +1842,12 @@ int download_chunks(download_state_t *state) {
            tasks_submitted, state->total_chunks);
     
     return tasks_submitted;
-}
+}/*
+// در download_chunks:
+    chunk_cb_arg_t *cb_arg = malloc(sizeof(chunk_cb_arg_t));
+    cb_arg->chunk_index = i;
+    cb_arg->state = state;
+*/
 /*
 // ارسال چانک‌ها به ترتیب
 void send_chunks_in_order(download_state_t *state) {
@@ -1866,6 +1905,7 @@ void send_chunks_in_order(download_state_t *state) {
 */
 // ارسال چانک‌ها به ترتیب
 void send_chunks_in_order(download_state_t *state) {
+    printf("[ENGINE] send_chunks_in_order started");
     int next_to_send = 0;
     
     while (next_to_send < state->total_chunks) {
@@ -1936,7 +1976,7 @@ void send_chunks_in_order(download_state_t *state) {
 void download_done(download_state_t *state) {
     if (!state) return;
     
-    printf("[ENGINE] Finalizing download for CID: %s\n", state->cid);
+    printf("[ENGINE] download_done Finalizing download for CID: %s\n", state->cid);
     
     // ارسال پیام اتمام
     send_frame(state->client_fd, OP_DOWNLOAD_DONE, NULL, 0);
@@ -1988,6 +2028,7 @@ void handle_connection(int client_fd) {
     
     printf("[ENGINE] New connection from client\n");
     
+
     for (;;) {
         uint8_t header[5];
         if (read_n(client_fd, header, 5) <= 0) break;
@@ -2051,7 +2092,7 @@ void handle_connection(int client_fd) {
                 
                 // Get manifest and start download
                 download_start(client_fd, cid, download_state);
-                
+                printf("HI",download_state->manifest);
                 if (/*download_start(client_fd, cid, state) == 0 &&*/ download_state->manifest) {
                     // Start parallel download
                     printf("real start");
@@ -2075,6 +2116,10 @@ void handle_connection(int client_fd) {
                 }
                 
                 free(cid);
+                break;
+            }
+            case OP_DOWNLOAD_CHUNK :{
+                printf("on case OP_DOWNLOAD_CHUNK");
                 break;
             } 
             /*case OP_DOWNLOAD_START: {
@@ -2206,8 +2251,8 @@ int main(int argc, char **argv) {
     }
     
     // تنظیم SO_REUSEADDR برای جلوگیری از خطای "Address already in use"
-    int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    //int opt = 1;
+    //setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
@@ -2238,9 +2283,25 @@ int main(int argc, char **argv) {
     printf("[ENGINE] Thread pool: %d threads\n", MAX_THREADS);
     printf("[ENGINE] Chunk size: %d KB\n", CHUNK_SIZE / 1024);
     printf("[ENGINE] Hash algorithm: %s\n", HASH_ALGO);
+    fflush(stdout);
     
+    //fcntl(server_fd, F_SETFL, O_NONBLOCK);
     // حلقه اصلی پذیرش اتصال
     while (1) {
+        //***** */
+    /*    int sockfd = accept(server_fd, NULL, NULL);
+    if (sockfd < 0) {
+        if (errno == EWOULDBLOCK || errno == EAGAIN) {
+            // هیچ اتصال جدیدی نیست، ادامه بده
+            usleep(100000); // 100ms
+            continue;
+        }
+        perror("accept error");
+        break;
+    }*/
+
+        //******* */
+        
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd < 0) {
             if (errno == EINTR) continue;
