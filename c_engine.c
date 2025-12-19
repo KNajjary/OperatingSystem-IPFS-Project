@@ -232,29 +232,31 @@ static manifest_lock_table_t g_lock_table;
 
 // ==================== توابع کمکی ====================
 
-// ایجاد پوشه‌های تو در تو
+// ایجاد پوشه‌های تو در تو /aa/bb/
 void ensure_dir(const char *path) {
-    char tmp[512];
-    char *p = NULL;
-    size_t len;
+    char tmp[512]; // بافر موقت برای ذخیره مسیر
+    char *p = NULL; // اشاره‌گر برای پیمایش رشته
+    size_t len; // طول رشته
     
-    snprintf(tmp, sizeof(tmp), "%s", path);
+    snprintf(tmp, sizeof(tmp), "%s", path);//write path in temp
     len = strlen(tmp);
-    if (tmp[len - 1] == '/') {
-        tmp[len - 1] = 0;
+    // اگر مسیر به / ختم شود، آن را حذف می‌کند
+    // "/home/user/" → "/home/user"
+    if (tmp[len - 1] == '/') { 
+        tmp[len - 1] = 0; // null
     }
     
-    for (p = tmp + 1; *p; p++) {
+    for (p = tmp + 1; *p; p++) { //skip first /
         if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, 0755);
-            *p = '/';
+            *p = 0; //0 is ASCI code for NULL
+            mkdir(tmp, 0755);//0755 is permissions
+            *p = '/';//put it back
         }
     }
-    mkdir(tmp, 0755);
+    mkdir(tmp, 0755);//final folder, we removed final / (or it didnt exest at the first place) so it is not generated in for loop
 }
 
-
+//===================================== pre defined ===========================
 // خواندن دقیق n بایت
 ssize_t read_n(int fd, void *buf, size_t n) {
     size_t got = 0;
@@ -294,7 +296,17 @@ int send_frame(int fd, uint8_t op, const void* payload, uint32_t len) {
     if (len && write_all(fd, payload, len) < 0) return -1;
     return 0;
 }
-
+// ارسال فریم
+/*int send_frame(int fd, uint8_t op, const void* payload, uint32_t len) {
+    uint8_t header[5];
+    header[0] = op;
+    uint32_t be_len = htonl(len);
+    memcpy(header + 1, &be_len, 4);
+    if (write_all(fd, header, 5) < 0) return -1;
+    if (len && write_all(fd, payload, len) < 0) return -1;
+    return 0;
+}*/
+//===================================================================
 // ارسال خطا
 int send_error(int fd, const char *code, const char *message) {
     char error_json[256];
@@ -1547,7 +1559,7 @@ void handle_upload_finish(int client_fd, upload_state_t *state) {
 
 // شروع دانلود
 void download_start(int client_fd, const char *cid,download_state_t* state) {
-    printf("[ENGINE] DOWNLOAD_START: cid=\"%s\"\n", cid);
+    //printf("[ENGINE] DOWNLOAD_START: cid=\"%s\"\n", cid);
     /*
     // ساختار وضعیت دانلود
 typedef struct download_state {
@@ -1559,26 +1571,33 @@ typedef struct download_state {
 } download_state_t;
     */
     // اعتبارسنجی CID
+    //printf("hi?");
     if (strlen(cid) < 10) {
         //printf("trying10");
         send_error(client_fd, E_BAD_CID, "Invalid CID format");
-        return NULL;
+        return ;
     }
-    //printf("trying");
+    //printf("trying lock");
     // گرفتن قفل خواندن برای مانیفست
     if (manifest_read_lock(cid) != LOCK_SUCCESS) {
         send_error(client_fd, E_BUSY, "System busy");
-        return NULL;
+        return ;
     }
-    manifest_info_t *manifest_info = find_manifest_entry(cid);
-
+    //printf("0");
+    manifest_entry_t *manifest_entry = find_manifest_entry(cid);
+    //printf("1");
+    manifest_info_t * manifest_info = NULL;
+    if(manifest_entry){
+        manifest_info = manifest_entry->manifest_info;
+        free(manifest_entry);
+    }
     if (!manifest_info){
         // خواندن مانیفست
         char *manifest_json = read_manifest(cid);
         if (!manifest_json) {
             manifest_unlock(cid, 0);
             send_error(client_fd, E_NOT_FOUND, "Manifest not found");
-            return NULL;
+            return ;
         }
         
         // پارس کردن مانیفست
@@ -1589,9 +1608,9 @@ typedef struct download_state {
             free(manifest_info);
             manifest_unlock(cid, 0);
             send_error(client_fd, E_BAD_CID, "Failed to parse manifest");
-            return NULL;
+            return ;
         }
-        printf("parsed");
+        //printf("parsed");
         free(manifest_json);
         add_manifest_entry(cid,manifest_info);
     }
@@ -1604,7 +1623,7 @@ typedef struct download_state {
         free_manifest_info(manifest_info);
         manifest_unlock(cid, 0);
         send_error(client_fd, E_BUSY, "System busy");
-        return NULL;
+        return ;
     }
     
     memset(state, 0, sizeof(download_state_t));
@@ -1634,28 +1653,39 @@ typedef struct download_state {
         free(state);
         manifest_unlock(cid, 0);
         send_error(client_fd, E_BUSY, "System busy");
-        return NULL;
+        return ;
     }
     
     // پر کردن آرایه مسیرها و اندیس‌ها
     for (int i = 0; i < state->total_chunks; i++) {
         state->chunk_paths[i] = strdup(manifest_info->chunks[i].file_path);
         state->chunk_order[i] = manifest_info->chunks[i].index;
-        char * hex;
+        //printf("bef1");
+        char hex[2*HASH_LENGTH+1];
         hash_to_hex(manifest_info->chunks[i].hash,hex);
-        state->chunk_data[i]= read_block(hex, manifest_info->chunks[i].size);
-        state->chunk_sizes[i] = manifest_info->chunks[i].size;
+        //printf("bef2");
+        state->chunk_data[i]= read_block(hex, &manifest_info->chunks[i].size);
+        state->chunk_ready[i] = 1;
+        printf(state->chunk_data[i]);
+        state->chunks_ready_count++;
+        //state->chunk_sizes[i] = manifest_info->chunks[i].size;
     }
     
-    // مقداردهی اولیه مکانیزم‌های همگام‌سازی
+        // مقداردهی اولیه مکانیزم‌های همگام‌سازی
     pthread_mutex_init(&state->lock, NULL);
     pthread_cond_init(&state->chunk_ready_cond, NULL);
     pthread_cond_init(&state->chunk_sent_cond, NULL);
     pthread_cond_init(&state->all_tasks_done_cond, NULL);
     
-    state->chunks_ready_count = 0;
+    // AFTER ALL CHUNKS ARE LOADED, signal the condition variable
+    pthread_mutex_lock(&state->lock);
+    state->next_expected_index = 0;  // We're ready to send from index 0
     state->chunks_sent_count = 0;
-    state->next_expected_index = 0;
+    pthread_cond_signal(&state->chunk_ready_cond);  // WAKE UP THE WAITING THREAD!
+    pthread_mutex_unlock(&state->lock);
+    //state->chunks_ready_count = 0;
+    //state->chunks_sent_count = 0;
+    //state->next_expected_index = 0;
     
     // افزایش reference count برای تمام بلاک‌ها
     for (int i = 0; i < state->total_chunks; i++) {
@@ -1668,7 +1698,7 @@ typedef struct download_state {
     manifest_unlock(cid, 0);
     
     printf("[ENGINE] Download started: %s, chunks: %d\n", cid, state->total_chunks);
-    //return state;
+    return ;//state;
 }
 
 // callback برای اتمام پردازش چانک دانلود
@@ -1843,6 +1873,7 @@ void send_chunks_in_order(download_state_t *state) {
         
         // منتظر بمان تا چانک بعدی آماده شود
         while (state->chunk_ready[next_to_send] == 0) {
+            printf("[ERROR] Chunk %d not ready, waiting\n", next_to_send);
             pthread_cond_wait(&state->chunk_ready_cond, &state->lock);
         }
         
@@ -1862,8 +1893,14 @@ void send_chunks_in_order(download_state_t *state) {
         uint8_t *payload = malloc(8 + state->chunk_sizes[next_to_send]);
         if (!payload) {
             pthread_mutex_unlock(&state->lock);
-            printf("[ERROR] Failed to allocate payload for chunk %d\n", next_to_send);
-            break;
+            printf("[ERROR] Failed to allocate payload for chunk %d\n", next_to_send);  
+            // Clean up the chunk data
+            free(state->chunk_data[next_to_send]);
+            state->chunk_data[next_to_send] = NULL;
+            next_to_send++;
+            continue;
+
+            //break;
         }
         
         memcpy(payload, &index, 4);
@@ -1951,7 +1988,7 @@ void handle_connection(int client_fd) {
     
     printf("[ENGINE] New connection from client\n");
     
-    while (1) {
+    for (;;) {
         uint8_t header[5];
         if (read_n(client_fd, header, 5) <= 0) break;
         
@@ -2033,6 +2070,7 @@ void handle_connection(int client_fd) {
                     download_done(download_state);
                 } else {
                     // Error already sent by download_start
+                    printf("NOOT");
                     free(download_state);
                 }
                 
